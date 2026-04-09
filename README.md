@@ -1,4 +1,4 @@
-# Hybrid ReAct Agent Mimarisi
+# Hybrid ReAct Agent Architecture
 
 A production-grade, closed-loop AI agent pipeline built with **LangGraph**, **FastAPI**, and **n8n**. This project demonstrates a hybrid reasoning and acting (ReAct) architecture specifically designed for supply chain and inventory risk analysis.
 
