@@ -29,7 +29,7 @@ Bu sistemi n8n orkestrasyonunda konumlandırmak son derece sezgiseldir. n8n üze
 ```
 
 🚨 **Kritik n8n Ayarı (Timeout - Zaman Aşımı):** 
-ReAct ajanlarının LLM bazlı akılları ve veritabanı okumaları dış çağrılara (OpenAI vb.) bağlıdır. Eğer LLM 3 defa döngüye girerse bu süre saniyeler sürebilir. N8n'deki HTTP Request nodunun ayarlarına (Settings / Options) tıklayarak **Timeout** baz süresini en az **60000 ms (60 saniye)** olarak değiştirin. Aksi halde Node aceleci davranıp cevap gelmeden akışı hata ile kıracaktır.
+ReAct ajanlarının LLM bazlı akılları ve veritabanı okumaları dış çağrılara (OpenAI, Gemini vb.) bağlıdır. Eğer LLM 3 defa döngüye girerse bu süre saniyeler sürebilir. N8n'deki HTTP Request nodunun ayarlarına (Settings / Options) tıklayarak **Timeout** baz süresini en az **60000 ms (60 saniye)** olarak değiştirin. Aksi halde Node aceleci davranıp cevap gelmeden akışı hata ile kıracaktır.
 
 * **IF (Koşul) Node Dalgalandırması:** 
 LangGraph'ın standart karmaşık array yapısı içinden veri ayıklamak n8n tarafında kabus olmasın diye FastApi root JSON değerlerinde `risk_level` değerini direkt iletiyor. N8n arayüzünde `{{ $json.risk_level }}` diyerek "Eğer durum 'High' ise Slack'e mesaj at, değilse e-posta at" tarzında kolay akışlar kurgulayabilirsiniz.
@@ -59,7 +59,7 @@ To orchestrate this API layer via an n8n webhook, simply create an **HTTP Reques
 ```
 
 🚨 **Critical n8n Setting (Timeout Guardrail):** 
-ReAct agents take time to reason, call tools, and fetch completions from OpenAI. Under the Options/Settings tab of your n8n HTTP Request Node, aggressively ensure you increase the **Timeout limit** to at least **60000 ms (60 seconds)**. Failure to do so will prematurely interrupt the agent cycle causing the n8n pipeline to collapse.
+ReAct agents take time to reason, call tools, and fetch completions from your LLM provider (OpenAI or Gemini). Under the Options/Settings tab of your n8n HTTP Request Node, aggressively ensure you increase the **Timeout limit** to at least **60000 ms (60 seconds)**. Failure to do so will prematurely interrupt the agent cycle causing the n8n pipeline to collapse.
 
 * **IF-Node Branching Strategy:** 
 Extracting deeply nested keys in n8n UI mappings can be frustrating. To make integrations easier, our FastAPI automatically hoists the `risk_level` variable directly at the top level of the JSON response payload. You can directly extract `{{ $json.risk_level }} == 'High'` in n8n's Switch/IF node branches to trigger exact conditional logic natively.

@@ -15,7 +15,7 @@ A production-grade, closed-loop AI agent pipeline built with **LangGraph**, **Fa
 
 ```text
 hybrid_react_agent/
-├── .env                 # Environment variables (OpenAI API Keys)
+├── .env.example         # Environment variables template (OpenAI/Gemini keys)
 ├── requirements.txt     # Python dependencies
 ├── database/            # SQLite setup scripts and raw DB files
 │   └── database.db      # Automatically populated mock storage limit
