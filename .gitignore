@@ -1,7 +1,20 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Environment & Secrets
 .env
+.DS_Store
+**/.DS_Store
+.idea/
+
+# Database files
 database.db
 database/agent_state.db
-agent_state.db
+*.db
+*-shm
+*-wal
+
+# n8n workflows and JSON artifacts (Confidential)
+n8n/
+*.json

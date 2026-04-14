@@ -41,9 +41,14 @@ python3 database/db_setup.py
 ```
 
 **3. Configure Environment Variables**
-Edit the `.env` file to include your OpenAI API key or respective LLM keys.
+Edit the `.env` file to select your provider and include the respective API keys. By default, the provider is set to `openai`, but you can easily switch it to `gemini`.
 ```env
-OPENAI_API_KEY=sk-your-key-here
+# Choose your provider: 'openai' or 'gemini'
+LLM_PROVIDER=gemini
+
+# Provider specific keys
+GEMINI_API_KEY=your-gemini-key-here
+OPENAI_API_KEY=sk-your-openai-key-here
 ```
 
 **4. Run the Server**

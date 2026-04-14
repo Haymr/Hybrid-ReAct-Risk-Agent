@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import trim_messages
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 import os
 from .state import AgentState
@@ -9,8 +10,24 @@ from tools.inventory import tools_list
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-# Initialize the LLM (Ensure OPENAI_API_KEY is in .env)
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+def get_llm():
+    """
+    Selects the LLM based on the LLM_PROVIDER environment variable.
+    Defaults to 'openai' if not specified.
+    """
+    provider = os.getenv("LLM_PROVIDER", "openai").lower()
+    
+    if provider == "gemini":
+        if not os.getenv("GEMINI_API_KEY"):
+            raise ValueError("GEMINI_API_KEY is not set in .env")
+        return ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+    else:
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ValueError("OPENAI_API_KEY is not set in .env")
+        return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+# Initialize the selected LLM
+llm = get_llm()
 
 # Bind our tools to the LLM
 llm_with_tools = llm.bind_tools(tools_list)
