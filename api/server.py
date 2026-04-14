@@ -3,7 +3,6 @@ import json
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 from agent.graph import app as agent_app
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 router = APIRouter()
 
@@ -18,18 +17,18 @@ class ChatResponse(BaseModel):
     risk_level: str | None = None
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+def chat_endpoint(request: ChatRequest):
+    print(request.user_id)
     """
     Receives user message and passes it to the LangGraph agent.
     Returns the agent's final decision and thought steps, optimized for n8n Webhooks.
     """
     config = {"configurable": {"thread_id": request.user_id}, "recursion_limit": 5}
     
-    # Retry mechanism for external/agent failures
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
-    async def invoke_agent():
+    def invoke_agent():
         steps = []
-        async for event in agent_app.astream(
+        # LLM max_retries will automatically handle temporary API timeouts.
+        for event in agent_app.stream(
             {"messages": [HumanMessage(content=request.message)]},
             config,
             stream_mode="values"
@@ -38,8 +37,8 @@ async def chat_endpoint(request: ChatRequest):
         return steps
         
     try:
-        # Get the agent steps
-        events = await invoke_agent()
+        # Get the agent steps (now running in FastAPI's background threadpool)
+        events = invoke_agent()
         
         thought_process = []
         final_message = ""

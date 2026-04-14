@@ -16,15 +16,16 @@ def get_llm():
     Defaults to 'openai' if not specified.
     """
     provider = os.getenv("LLM_PROVIDER", "openai").lower()
+    print(f"LLM PROVIDER: {provider}")
     
     if provider == "gemini":
         if not os.getenv("GEMINI_API_KEY"):
             raise ValueError("GEMINI_API_KEY is not set in .env")
-        return ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+        return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, max_retries=3)
     else:
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY is not set in .env")
-        return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        return ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3)
 
 # Initialize the selected LLM
 llm = get_llm()
@@ -54,15 +55,27 @@ prompt_template = ChatPromptTemplate.from_messages([
 # Chain the prompt template with our tools-bound LLM
 agent_runnable = prompt_template | llm_with_tools
 
+def count_tokens_local(messages) -> int:
+    """
+    Lokal token sayici. 
+    Eger token_counter=llm yaparsak, Gemini/OpenAI'a her denemede countTokens HTTP istegi atip sunucuyu (503/429) rate limit sokar.
+    1 token yaklasik 4 karaktere denk gelir.
+    """
+    total = 0
+    for m in messages:
+        content = str(m.content) if hasattr(m, "content") else str(m)
+        total += len(content) // 4
+    return total
+
 # Initialize the message trimmer to prevent token/context bloat
 trimmer = trim_messages(
     max_tokens=4000,
     strategy="last",
-    token_counter=llm,
+    token_counter=count_tokens_local,
     allow_partial=False
 )
 
-async def agent_node(state: AgentState):
+def agent_node(state: AgentState):
     """
     LLM decision-making node.
     It trims the conversation history to max 4000 tokens, 
@@ -70,7 +83,7 @@ async def agent_node(state: AgentState):
     and appends the LLM's response.
     """
     trimmed_history = trimmer.invoke(state["messages"])
-    response = await agent_runnable.ainvoke({"messages": trimmed_history})
+    response = agent_runnable.invoke({"messages": trimmed_history})
     return {"messages": [response]}
 
 
@@ -98,7 +111,12 @@ workflow.add_conditional_edges("agent", should_continue, ["tools", END])
 workflow.add_edge("tools", "agent")
 
 # Initialize Sqlite Checkpointer for true persistence
-conn = sqlite3.connect("database/agent_state.db", check_same_thread=False)
+import os
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "database", "agent_state.db")
+
+# Veritabanina baglan
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.execute("PRAGMA journal_mode=WAL;")
 conn.execute("PRAGMA synchronous=NORMAL;")
 memory = SqliteSaver(conn)
