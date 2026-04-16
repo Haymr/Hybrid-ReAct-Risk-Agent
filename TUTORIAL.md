@@ -34,6 +34,11 @@ ReAct ajanlarının LLM bazlı akılları ve veritabanı okumaları dış çağr
 * **IF (Koşul) Node Dalgalandırması:** 
 LangGraph'ın standart karmaşık array yapısı içinden veri ayıklamak n8n tarafında kabus olmasın diye FastApi root JSON değerlerinde `risk_level` değerini direkt iletiyor. N8n arayüzünde `{{ $json.risk_level }}` diyerek "Eğer durum 'High' ise Slack'e mesaj at, değilse e-posta at" tarzında kolay akışlar kurgulayabilirsiniz.
 
+### 3. Varlık Çözümleme ve Hafıza Temizliği (Bakım Kılavuzu)
+* Ajan direkt "Bana laptop listele" gibi kapalı isteklerde `search_products` aracıyla veritabanında arama yapar (Entity Resolution). DoS atakları ve veri sızdırmalarını (Bilgi İfşası) engellemek adına SQL `LIMIT 5 (Top-K)` korumalı kurgulanmıştır ve bu limitasyon projeyi veri tabanı kaynaklı yavaşlamalardan korur.
+* LangGraph checkpointer yapısı zamanla `agent_state.db` dosyasını şişirecektir. Uzun soluklu üretim ortamlarında UUIDv6 mantığıyla en eski mesaj/içerik (thread) geçmişini silerek veri tabanı depolama kapasitesini sıkıştıran ve rahatlatan komutu periyodik olarak çalıştırabilirsiniz:
+  `python scripts/prune_db.py 7` (Sondan "7" günü korur, öncekileri VACUUM komutu ile siler.)
+
 ---
 
 ## 🇬🇧 English Tutorial
@@ -63,3 +68,8 @@ ReAct agents take time to reason, call tools, and fetch completions from your LL
 
 * **IF-Node Branching Strategy:** 
 Extracting deeply nested keys in n8n UI mappings can be frustrating. To make integrations easier, our FastAPI automatically hoists the `risk_level` variable directly at the top level of the JSON response payload. You can directly extract `{{ $json.risk_level }} == 'High'` in n8n's Switch/IF node branches to trigger exact conditional logic natively.
+
+### 3. Entity Resolution & Database Pruning (Maintenance)
+* If users provide an incomplete product prompt (e.g. "laptop"), the agent autonomously initiates the `search_products` fallback logic framework. Through rigorous hardware constraints `SQL LIMIT 5 (Top-K)`, massive API Denial of Service context window escalations as well as sensitive property leakage are forcefully thwarted.
+* Over extensive usage, SQLite LangGraph checkpoint saves will grow substantially. In production environments, rely on the temporal UUIDv6 resolution utility to systematically prune old conversation thread entries while compressing bytes (`VACUUM`):
+  `python scripts/prune_db.py 7` (Preserves threads from the last "7" days, deleting outdated data to ensure optimal API speed bounds.)

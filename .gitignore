@@ -21,3 +21,6 @@ n8n/
 
 # Local scratchpads
 scratch/
+
+# Confidential Data Files
+*.csv

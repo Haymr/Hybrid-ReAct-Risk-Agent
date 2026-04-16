@@ -51,7 +51,14 @@ def chat_endpoint(request: ChatRequest):
             
             # Extract meaningful text safely
             if hasattr(last_msg, "content") and last_msg.content:
-                final_message = last_msg.content
+                if isinstance(last_msg.content, list):
+                    # Combine text chunks if content is a list of blocks
+                    final_message = "".join(
+                        chunk.get("text", "") if isinstance(chunk, dict) else str(chunk) 
+                        for chunk in last_msg.content
+                    )
+                else:
+                    final_message = str(last_msg.content)
                 
             # Record thought process metadata (simplistic extract)
             step_info = {
@@ -83,5 +90,10 @@ def chat_endpoint(request: ChatRequest):
         )
         
     except Exception as e:
-        # Handle recursion limit or other errors gracefully
-        raise HTTPException(status_code=500, detail=str(e))
+        # Graceful Degradation: Recursion/Timeout vb cokmelerde LLM i darlamak yerine JSON Safety Net
+        return ChatResponse(
+            response="I encountered a technical difficulty while resolving the supply chain data or fell into a reasoning loop. Please verify the product details and try again.",
+            thought_process=[{"type": "Error", "content": str(e)}],
+            tool_used=None,
+            risk_level="Error"
+        )

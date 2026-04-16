@@ -21,16 +21,20 @@ def calculate_inventory_risk(product_name: str) -> dict:
         cursor = conn.cursor()
         
         cursor.execute(
-            "SELECT current_stock, critical_threshold, sales_velocity_30d FROM products WHERE name LIKE ?", 
+            "SELECT name, current_stock, critical_threshold, sales_velocity_30d FROM products WHERE name LIKE ?", 
             (f"%{product_name}%",)
         )
-        row = cursor.fetchone()
+        rows = cursor.fetchall()
         conn.close()
         
-        if not row:
+        if not rows:
             return {"error": f"Product '{product_name}' not found in database. Ask user for correct product name."}
             
-        current_stock, critical_threshold, sales_velocity_30d = row
+        if len(rows) > 1:
+            product_names = [r[0] for r in rows]
+            return {"error": f"Multiple products found containing '{product_name}': {product_names}. Please ask the user to clarify which specific product they mean."}
+            
+        name, current_stock, critical_threshold, sales_velocity_30d = rows[0]
         
         # Risk Dynamics
         risk_score = 0
@@ -59,4 +63,36 @@ def calculate_inventory_risk(product_name: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-tools_list = [calculate_inventory_risk]
+class SearchInput(BaseModel):
+    query: str = Field(..., description="The general product category or partial name to search for (e.g., 'laptop', 'mouse').")
+
+@tool("search_products", args_schema=SearchInput)
+def search_products(query: str) -> dict:
+    """
+    Searches the database for available products matching a general category or partial name.
+    Returns a maximum of 5 product names to prevent context bloat.
+    ONLY returns the names, NOT the risk scores or stock levels.
+    """
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../database/database.db"))
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        cursor = conn.cursor()
+        
+        # LIMIT 5 prevents Context Window Denial of Service (DoS) and context bloat.
+        cursor.execute(
+            "SELECT name FROM products WHERE name LIKE ? LIMIT 5", 
+            (f"%{query}%",)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            return {"error": f"No products found matching '{query}'."}
+            
+        product_names = [r[0] for r in rows]
+        return {"matching_products": product_names}
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+tools_list = [calculate_inventory_risk, search_products]

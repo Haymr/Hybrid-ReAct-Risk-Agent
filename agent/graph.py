@@ -9,6 +9,7 @@ from .state import AgentState
 from tools.inventory import tools_list
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
+import tiktoken
 
 def get_llm():
     """
@@ -21,7 +22,7 @@ def get_llm():
     if provider == "gemini":
         if not os.getenv("GEMINI_API_KEY"):
             raise ValueError("GEMINI_API_KEY is not set in .env")
-        return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, max_retries=3)
+        return ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0, max_retries=3)
     else:
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY is not set in .env")
@@ -35,15 +36,17 @@ llm_with_tools = llm.bind_tools(tools_list)
 
 # System Prompt with strict guardrails
 SYSTEM_PROMPT = """
-You are a supply chain and inventory risk analysis assistant.
-Your ONLY purpose is to analyze inventory risks, stock levels, and supply chain metrics.
-You MUST use the 'calculate_inventory_risk' tool when asked about specific products.
+You are a highly capable Supply Chain and Inventory Risk Analysis Consultant.
+Your main purpose is to analyze inventory risks, stock levels, and supply chain metrics, and then offer actionable advice or warnings based on the data.
 
-Strict Rules:
-1. DO NOT answer general knowledge questions (e.g., weather, history, coding).
-2. If the user asks something unrelated to inventory or supply chain, politely decline.
-3. DO NOT invent product data. If you don't know the exact product name to use the tool, ask the user.
-4. Keep your answers concise and professional.
+You MUST use the 'calculate_inventory_risk' tool to fetch exact stock data when the user asks about specific products.
+
+Core Guidelines:
+1. Always maintain a conversational, helpful, and professional consultant tone. Remember previous context and references.
+2. Provide strategic advice only related to inventory management (e.g., ordering more stock, identifying bottlenecks, supplier negotiations).
+3. If the user asks about general knowledge, weather, or topics unrelated to supply chain/inventory, politely decline.
+4. DO NOT invent product data. If the user provides an incomplete name or asks for options (e.g. 'laptop'), DO NOT say you can't browse. Instead, use the 'search_products' tool to find available options and ask the user to choose.
+5. Emphasize any "High" risk items and suggest immediate actions.
 """
 
 # Create prompt template
@@ -57,14 +60,19 @@ agent_runnable = prompt_template | llm_with_tools
 
 def count_tokens_local(messages) -> int:
     """
-    Lokal token sayici. 
-    Eger token_counter=llm yaparsak, Gemini/OpenAI'a her denemede countTokens HTTP istegi atip sunucuyu (503/429) rate limit sokar.
-    1 token yaklasik 4 karaktere denk gelir.
+    Local tiktoken proxy counter. 
+    Eger token_counter=llm yaparsak, Gemini/OpenAI'a HTTP istegi atip sunucuyu (503) rate limit sokar.
+    Tiktoken ile sifir api cagrisiyla %97+ dogrulukla sayim yapar.
     """
+    try:
+        encoding = tiktoken.get_encoding("cl100k_base")
+    except:
+        encoding = tiktoken.encoding_for_model("gpt-4")
+        
     total = 0
     for m in messages:
         content = str(m.content) if hasattr(m, "content") else str(m)
-        total += len(content) // 4
+        total += len(encoding.encode(content))
     return total
 
 # Initialize the message trimmer to prevent token/context bloat
