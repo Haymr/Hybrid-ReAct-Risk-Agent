@@ -17,6 +17,11 @@ def get_ml_model():
             _model = pickle.load(f)
     return _model
 
+def reload_model():
+    """Forces the model to be reloaded from disk on the next invocation."""
+    global _model
+    _model = None
+
 class RiskAnalysisInput(BaseModel):
     product_sku: str = Field(..., description="The exact SKU of the product to analyze.")
 

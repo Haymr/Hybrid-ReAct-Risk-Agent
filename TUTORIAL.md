@@ -44,6 +44,13 @@ Agent sunucusunu başlatmadan önce veritabanının oluşturulması ve XGBoost y
 * LangGraph checkpointer yapısı zamanla `agent_state.db` dosyasını şişirecektir. Uzun soluklu üretim ortamlarında UUIDv6 mantığıyla en eski mesaj/içerik (thread) geçmişini silerek veri tabanı depolama kapasitesini sıkıştıran ve rahatlatan komutu periyodik olarak çalıştırabilirsiniz:
   `python scripts/prune_db.py 7` (Sondan "7" günü korur, öncekileri VACUUM komutu ile siler.)
 
+### 5. Otonom Taramalar ve Dinamik Stok (Faz 3)
+* **Gece Taraması (Nightly Batch Scanner):** Sistem her gece otonom olarak `GET /scan-inventory` endpointini çağırarak risk seviyesi fırlamış (Örn: Low -> Critical) ürünleri bulup raporlar. 
+* *Eğer sunucu kapalı kalırsa* n8n schedule trigger'ı zamanı kaçırabilir. Sistem geri açıldığında bu taramayı **manuel** tetiklemek isterseniz, sunucu çalışırken terminalden şu komutu girmeniz yeterlidir:
+  `curl http://127.0.0.1:8000/scan-inventory`
+* **Stok Düşüşü:** `POST /update-stock` endpointine `{ "sku": "...", "qty_sold": 5 }` JSON payload'ı atarak gerçek dünyadaki satışları veritabanında simüle edebilirsiniz.
+* **Model Yeniden Eğitimi:** Haftalık periyotlarla `POST /retrain` endpointi çağırılarak AI modelinin ağırlıkları sıfır kesintiyle güncellenir.
+
 ---
 
 ## 🇬🇧 English Tutorial
@@ -83,3 +90,10 @@ Before starting the agent server, you must generate the database schema and trai
 
 * Over extensive usage, SQLite LangGraph checkpoint saves will grow substantially. In production environments, rely on the temporal UUIDv6 resolution utility to systematically prune old conversation thread entries while compressing bytes (`VACUUM`):
   `python scripts/prune_db.py 7` (Preserves threads from the last "7" days, deleting outdated data to ensure optimal API speed bounds.)
+
+### 5. Autonomous Scanners & Dynamic Stock (Phase 3)
+* **Nightly Batch Scanner:** The system autonomously hits `GET /scan-inventory` every night to compute risks for the entire warehouse and alerts on escalations (e.g., Low -> Critical).
+* *If the server goes offline* during the scheduled execution time, the n8n trigger will miss the window. When the server is back online, you can **manually** trigger the snapshot calculation by running:
+  `curl http://127.0.0.1:8000/scan-inventory`
+* **Stock Updates:** Real-world ERP systems or n8n can simulate active sales by sending a JSON payload (`{"sku": "...", "qty_sold": 5}`) to `POST /update-stock`.
+* **Zero-Downtime Model Retraining:** Periodically call `POST /retrain` to trigger background AI training and seamlessly replace the active model weights in memory without stopping the FastAPI server.

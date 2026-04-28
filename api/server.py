@@ -15,6 +15,7 @@ class ChatResponse(BaseModel):
     thought_process: list[dict] = []
     tool_used: str | None = None
     risk_level: str | None = None
+    requires_alert: bool = False
 
 @router.post("/chat", response_model=ChatResponse)
 def chat_endpoint(request: ChatRequest):
@@ -43,6 +44,7 @@ def chat_endpoint(request: ChatRequest):
         final_message = ""
         tool_used = None
         risk_level = None
+        requires_alert = False
         
         for event in events:
             # Safely get the last message
@@ -76,6 +78,7 @@ def chat_endpoint(request: ChatRequest):
                     tool_data = json.loads(last_msg.content)
                     if isinstance(tool_data, dict) and "risk_level" in tool_data:
                         risk_level = tool_data["risk_level"]
+                        requires_alert = risk_level in ["High", "Critical"]
                 except:
                     pass
                 
@@ -85,7 +88,8 @@ def chat_endpoint(request: ChatRequest):
             response=final_message,
             thought_process=thought_process,
             tool_used=tool_used,
-            risk_level=risk_level
+            risk_level=risk_level,
+            requires_alert=requires_alert
         )
         
     except Exception as e:
@@ -94,5 +98,141 @@ def chat_endpoint(request: ChatRequest):
             response="I encountered a technical difficulty while resolving the supply chain data or fell into a reasoning loop. Please verify the product details and try again.",
             thought_process=[{"type": "Error", "content": str(e)}],
             tool_used=None,
-            risk_level="Error"
+            risk_level="Error",
+            requires_alert=False
         )
+
+class StockUpdateRequest(BaseModel):
+    sku: str
+    qty_sold: int
+
+@router.post("/update-stock")
+def update_stock(request: StockUpdateRequest):
+    """
+    Simulates real-world sales by decrementing the current_stock in the inventory table.
+    """
+    import sqlite3
+    import os
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../database/amazon_sales.db"))
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=rw", uri=True)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT current_stock FROM inventory WHERE sku = ?", (request.sku,))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail=f"SKU {request.sku} not found")
+            
+        new_stock = max(0, row[0] - request.qty_sold)
+        cursor.execute("UPDATE inventory SET current_stock = ? WHERE sku = ?", (new_stock, request.sku))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "sku": request.sku, "new_stock": new_stock}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/retrain")
+def retrain_model():
+    """
+    Runs the offline training script via subprocess and reloads the model artifact into memory.
+    """
+    import subprocess
+    import os
+    from tools.inventory import reload_model
+    
+    script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../scripts/train_model.py"))
+    
+    try:
+        result = subprocess.run([os.sys.executable, script_path], capture_output=True, text=True, check=True)
+        reload_model()
+        return {"status": "success", "message": "Model retrained and loaded into memory successfully.", "logs": result.stdout}
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Training failed: {e.stderr}")
+
+@router.get("/scan-inventory")
+def scan_inventory():
+    """
+    Nightly Batch Scanner to calculate risk for all items and return SKUs that have escalated in risk.
+    """
+    import sqlite3
+    import os
+    import pandas as pd
+    from tools.inventory import get_ml_model
+    
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../database/amazon_sales.db"))
+    
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=rw", uri=True)
+        
+        query = '''
+        WITH max_date AS (SELECT MAX(date) as max_d FROM sales_history),
+        lags AS (
+            SELECT 
+                s.sku,
+                SUM(CASE WHEN s.date > date(m.max_d, '-7 days') THEN s.qty ELSE 0 END) as lag_7,
+                SUM(CASE WHEN s.date > date(m.max_d, '-14 days') THEN s.qty ELSE 0 END) as lag_14,
+                SUM(CASE WHEN s.date > date(m.max_d, '-30 days') THEN s.qty ELSE 0 END) as lag_30
+            FROM sales_history s
+            CROSS JOIN max_date m
+            GROUP BY s.sku
+        )
+        SELECT i.sku, i.current_stock, i.critical_threshold, 
+               COALESCE(l.lag_7, 0) as lag_7, 
+               COALESCE(l.lag_14, 0) as lag_14, 
+               COALESCE(l.lag_30, 0) as lag_30
+        FROM inventory i
+        LEFT JOIN lags l ON i.sku = l.sku
+        '''
+        
+        df = pd.read_sql_query(query, conn)
+        if df.empty:
+            return {"escalated_items": []}
+            
+        model = get_ml_model()
+        X_infer = df[['lag_7', 'lag_14', 'lag_30']]
+        df['predicted_demand'] = model.predict(X_infer).clip(min=0).astype(int)
+        
+        demand_per_day = df['predicted_demand'] / 30.0
+        df['days_of_stock'] = df.apply(lambda row: row['current_stock'] / demand_per_day[row.name] if demand_per_day[row.name] > 0 else float('inf'), axis=1)
+        
+        def get_risk(row):
+            if row['current_stock'] <= row['critical_threshold']: return "Critical"
+            elif row['days_of_stock'] < 7: return "High"
+            elif row['days_of_stock'] < 14: return "Medium"
+            else: return "Low"
+            
+        df['risk_level'] = df.apply(get_risk, axis=1)
+        
+        # Create table if not exists just to be safe
+        conn.execute('''CREATE TABLE IF NOT EXISTS risk_snapshots (sku TEXT PRIMARY KEY, last_risk_level TEXT)''')
+        
+        snapshots = pd.read_sql_query("SELECT sku, last_risk_level FROM risk_snapshots", conn)
+        merged = df.merge(snapshots, on='sku', how='left')
+        
+        risk_rank = {"Low": 0, "Medium": 1, "High": 2, "Critical": 3}
+        escalated_items = []
+        
+        for _, row in merged.iterrows():
+            old_risk = row['last_risk_level'] if pd.notna(row['last_risk_level']) else "Low"
+            new_risk = row['risk_level']
+            
+            if risk_rank[new_risk] > risk_rank[old_risk]:
+                escalated_items.append({
+                    "sku": row['sku'],
+                    "old_risk": old_risk,
+                    "new_risk": new_risk,
+                    "current_stock": row['current_stock'],
+                    "predicted_demand_30d": row['predicted_demand']
+                })
+                
+        snapshot_updates = df[['sku', 'risk_level']].copy()
+        snapshot_updates.rename(columns={'risk_level': 'last_risk_level'}, inplace=True)
+        snapshot_updates.to_sql('risk_snapshots', conn, if_exists='replace', index=False)
+        
+        conn.close()
+        return {"status": "success", "total_scanned": len(df), "escalated_items": escalated_items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

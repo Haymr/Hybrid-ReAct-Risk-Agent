@@ -15,6 +15,28 @@ A production-grade, closed-loop AI agent pipeline built with **LangGraph**, **Fa
 * **n8n Ready:** Specifically optimized JSON responses (exposing `tool_used`, `risk_level`) to act as a seamless HTTP Webhook backend for an n8n orchestration flow.
 * **Autonomous Database Maintenance:** Cleans historic memory by deciphering UUIDv6 temporal data (`prune_db.py`).
 
+## 🧠 Mimari Diyagram (Architecture)
+
+```mermaid
+graph TD;
+    User[User/Slack] -->|Webhook| n8n[n8n Orchestration];
+    n8n -->|JSON POST| FastAPI[FastAPI Agent Server];
+    FastAPI --> LangGraph[LangGraph ReAct Agent];
+    
+    subgraph Agent Tools
+        LangGraph -->|search_products| DB[(SQLite DB)]
+        LangGraph -->|calculate_inventory_risk| XGBoost((XGBoost ML))
+    end
+    
+    XGBoost -.->|Reads Lag Features| DB;
+    
+    subgraph Dynamic Endpoints
+        Scanner[Nightly Batch Scanner] -->|GET /scan-inventory| FastAPI
+        Sales[Real-time ERP Sales] -->|POST /update-stock| FastAPI
+        Retrain[Weekly Retrain] -->|POST /retrain| FastAPI
+    end
+```
+
 ## 📂 Project Structure
 
 ```text
