@@ -10,3 +10,10 @@ python-dotenv
 langgraph-checkpoint-sqlite
 tenacity
 tiktoken
+pandas
+matplotlib
+seaborn
+jupyter
+xgboost
+scikit-learn
+numpy

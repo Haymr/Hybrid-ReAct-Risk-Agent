@@ -24,3 +24,7 @@ scratch/
 
 # Confidential Data Files
 *.csv
+
+# Machine Learning Artifacts (Prevent Model Weights Leakage)
+models/
+*.pkl

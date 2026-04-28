@@ -1,86 +1,131 @@
 import sqlite3
 import os
+import pickle
+import pandas as pd
+import xgboost as xgb
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+# Model Loading Helper (To avoid loading pickle on every invocation)
+_model = None
+
+def get_ml_model():
+    global _model
+    if _model is None:
+        model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../models/xgboost_demand_forecaster.pkl"))
+        with open(model_path, "rb") as f:
+            _model = pickle.load(f)
+    return _model
+
 class RiskAnalysisInput(BaseModel):
-    product_name: str = Field(..., description="The exact name of the product to analyze.")
+    product_sku: str = Field(..., description="The exact SKU of the product to analyze.")
 
 @tool("calculate_inventory_risk", args_schema=RiskAnalysisInput)
-def calculate_inventory_risk(product_name: str) -> dict:
+def calculate_inventory_risk(product_sku: str) -> dict:
     """
-    Calculates the supply chain risk score, current stock, and sales velocity for a specific product.
-    ONLY use this tool when the user asks for the risk score or stock status of a specific product.
-    DO NOT invent product names. If the product name is missing, ask the user.
+    Dynamically predicts the 30-day demand using an ML model and calculates the risk score based on current stock.
+    ONLY use this tool when the user asks for the risk score or stock status of a specific product SKU.
+    DO NOT invent SKUs. If the SKU is missing or ambiguous, use 'search_products' tool to clarify.
     """
-    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../database/database.db"))
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../database/amazon_sales.db"))
     
     try:
-        # Read-Only (ro) connection constraint as defined in implementation plan
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.cursor()
         
+        # 1. Fetch Inventory Status
         cursor.execute(
-            "SELECT name, current_stock, critical_threshold, sales_velocity_30d FROM products WHERE name LIKE ?", 
-            (f"%{product_name}%",)
+            "SELECT sku, current_stock, critical_threshold FROM inventory WHERE sku LIKE ?", 
+            (f"%{product_sku}%",)
         )
         rows = cursor.fetchall()
-        conn.close()
         
         if not rows:
-            return {"error": f"Product '{product_name}' not found in database. Ask user for correct product name."}
+            conn.close()
+            return {"error": f"Product SKU '{product_sku}' not found in inventory. Ask user for correct SKU or use search_products."}
             
         if len(rows) > 1:
-            product_names = [r[0] for r in rows]
-            return {"error": f"Multiple products found containing '{product_name}': {product_names}. Please ask the user to clarify which specific product they mean."}
+            skus = [r[0] for r in rows]
+            conn.close()
+            return {"error": f"Multiple SKUs found containing '{product_sku}': {skus}. Please ask the user to clarify which specific SKU they mean."}
             
-        name, current_stock, critical_threshold, sales_velocity_30d = rows[0]
+        sku, current_stock, critical_threshold = rows[0]
         
-        # Risk Dynamics
-        risk_score = 0
-        risk_level = "Low"
+        # 2. Fetch Historical Lags for ML Model
+        cursor.execute("""
+            WITH last_date AS (SELECT MAX(date) as max_d FROM sales_history WHERE sku = ?)
+            SELECT 
+                COALESCE(SUM(CASE WHEN date > date(max_d, '-7 days') THEN qty ELSE 0 END), 0) as lag_7,
+                COALESCE(SUM(CASE WHEN date > date(max_d, '-14 days') THEN qty ELSE 0 END), 0) as lag_14,
+                COALESCE(SUM(CASE WHEN date > date(max_d, '-30 days') THEN qty ELSE 0 END), 0) as lag_30
+            FROM sales_history, last_date
+            WHERE sku = ?
+        """, (sku, sku))
         
-        # Threshold penalty
-        if current_stock < critical_threshold:
-            risk_score += 50
+        lag_data = cursor.fetchone()
+        conn.close()
         
-        # Velocity penalty
-        if sales_velocity_30d > current_stock:
-            risk_score += 40
+        if not lag_data or lag_data == (0, 0, 0):
+            # No sales history found, fallback to 0 demand
+            lag_7, lag_14, lag_30 = 0, 0, 0
+            predicted_demand_30d = 0
+        else:
+            lag_7, lag_14, lag_30 = lag_data
+            # 3. Predict Demand via ML Model
+            model = get_ml_model()
+            X_infer = pd.DataFrame([{'lag_7': lag_7, 'lag_14': lag_14, 'lag_30': lag_30}])
+            predicted_demand_30d = max(0, int(model.predict(X_infer)[0])) # Demand can't be negative
             
-        if risk_score >= 80:
-            risk_level = "High"
-        elif risk_score >= 40:
-            risk_level = "Medium"
+        # 4. Risk Dynamics Calculation (Refactored to 'Days of Stock' logic)
+        if predicted_demand_30d > 0:
+            # How many days will the current stock last?
+            days_of_stock = current_stock / (predicted_demand_30d / 30)
+        else:
+            days_of_stock = float('inf')
+            
+        if current_stock <= critical_threshold:
+            risk_score, risk_level = 90, "Critical"
+        elif days_of_stock < 7:
+            risk_score, risk_level = 70, "High"
+        elif days_of_stock < 14:
+            risk_score, risk_level = 40, "Medium"
+        else:
+            risk_score, risk_level = 10, "Low"
             
         return {
+            "sku": sku,
             "risk_score": risk_score,
             "risk_level": risk_level,
             "current_stock": current_stock,
             "critical_threshold": critical_threshold,
-            "sales_velocity_30d": sales_velocity_30d,
+            "predicted_demand_30d": predicted_demand_30d,
+            "historical_lags": {
+                "last_7_days": lag_7,
+                "last_14_days": lag_14,
+                "last_30_days": lag_30
+            }
         }
     except Exception as e:
         return {"error": str(e)}
 
 class SearchInput(BaseModel):
-    query: str = Field(..., description="The general product category or partial name to search for (e.g., 'laptop', 'mouse').")
+    query: str = Field(..., description="The general product category or partial SKU to search for (e.g., 'kurta', 'JNE').")
 
 @tool("search_products", args_schema=SearchInput)
 def search_products(query: str) -> dict:
     """
-    Searches the database for available products matching a general category or partial name.
-    Returns a maximum of 5 product names to prevent context bloat.
-    ONLY returns the names, NOT the risk scores or stock levels.
+    Searches the database for available product SKUs matching a general category or partial name.
+    Returns a maximum of 5 SKUs to prevent context bloat.
+    ONLY returns the SKUs, NOT the risk scores or stock levels.
     """
-    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../database/database.db"))
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../database/amazon_sales.db"))
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.cursor()
         
         # LIMIT 5 prevents Context Window Denial of Service (DoS) and context bloat.
         cursor.execute(
-            "SELECT name FROM products WHERE name LIKE ? LIMIT 5", 
+            "SELECT sku FROM inventory WHERE sku LIKE ? LIMIT 5", 
             (f"%{query}%",)
         )
         rows = cursor.fetchall()

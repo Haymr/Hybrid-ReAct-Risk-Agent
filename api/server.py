@@ -18,7 +18,6 @@ class ChatResponse(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 def chat_endpoint(request: ChatRequest):
-    print(request.user_id)
     """
     Receives user message and passes it to the LangGraph agent.
     Returns the agent's final decision and thought steps, optimized for n8n Webhooks.

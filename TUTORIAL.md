@@ -36,6 +36,11 @@ LangGraph'ın standart karmaşık array yapısı içinden veri ayıklamak n8n ta
 
 ### 3. Varlık Çözümleme ve Hafıza Temizliği (Bakım Kılavuzu)
 * Ajan direkt "Bana laptop listele" gibi kapalı isteklerde `search_products` aracıyla veritabanında arama yapar (Entity Resolution). DoS atakları ve veri sızdırmalarını (Bilgi İfşası) engellemek adına SQL `LIMIT 5 (Top-K)` korumalı kurgulanmıştır ve bu limitasyon projeyi veri tabanı kaynaklı yavaşlamalardan korur.
+### 4. Makine Öğrenmesi & Veri Hattı Kurulumu (Faz 2)
+Agent sunucusunu başlatmadan önce veritabanının oluşturulması ve XGBoost yapay zeka modelinin eğitilmesi zorunludur:
+1. `python3 scripts/csv_to_db.py`: `cleaned_sales.csv` verisini SQLite formatına dönüştürür ve gerçek satış hızına oranlı sahte (mock) stok durumları üretir (`amazon_sales.db`).
+2. `python3 scripts/train_model.py`: Geriye dönük Lag (7, 14, 30 gün) verilerini kullanarak **XGBoost Talep Tahmin Modelini** eğitir ve sistemi Agent'ın kullanımına hazır hale getirir (`models/xgboost_demand_forecaster.pkl`).
+
 * LangGraph checkpointer yapısı zamanla `agent_state.db` dosyasını şişirecektir. Uzun soluklu üretim ortamlarında UUIDv6 mantığıyla en eski mesaj/içerik (thread) geçmişini silerek veri tabanı depolama kapasitesini sıkıştıran ve rahatlatan komutu periyodik olarak çalıştırabilirsiniz:
   `python scripts/prune_db.py 7` (Sondan "7" günü korur, öncekileri VACUUM komutu ile siler.)
 
@@ -71,5 +76,10 @@ Extracting deeply nested keys in n8n UI mappings can be frustrating. To make int
 
 ### 3. Entity Resolution & Database Pruning (Maintenance)
 * If users provide an incomplete product prompt (e.g. "laptop"), the agent autonomously initiates the `search_products` fallback logic framework. Through rigorous hardware constraints `SQL LIMIT 5 (Top-K)`, massive API Denial of Service context window escalations as well as sensitive property leakage are forcefully thwarted.
+### 4. Machine Learning & Data Pipeline Setup (Phase 2)
+Before starting the agent server, you must generate the database schema and train the XGBoost Artificial Intelligence model:
+1. `python3 scripts/csv_to_db.py`: Converts the `cleaned_sales.csv` into a structured SQLite format (`amazon_sales.db`) and systematically generates proportional synthetic stock levels based on true historical velocities.
+2. `python3 scripts/train_model.py`: Trains the **XGBoost Demand Forecasting Model** using historically engineered backward Lags (7, 14, 30 days) and registers it as a read-to-inference artifact (`models/xgboost_demand_forecaster.pkl`).
+
 * Over extensive usage, SQLite LangGraph checkpoint saves will grow substantially. In production environments, rely on the temporal UUIDv6 resolution utility to systematically prune old conversation thread entries while compressing bytes (`VACUUM`):
   `python scripts/prune_db.py 7` (Preserves threads from the last "7" days, deleting outdated data to ensure optimal API speed bounds.)

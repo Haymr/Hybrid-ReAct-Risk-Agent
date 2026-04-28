@@ -8,10 +8,12 @@ A production-grade, closed-loop AI agent pipeline built with **LangGraph**, **Fa
 * **Persistent Memory:** Utilizes `SqliteSaver` in WAL mode to handle concurrent conversation state management efficiently.
 * **Token Bloat Protection:** Employs `trim_messages` combined with a local `tiktoken` proxy to ensure the context window remains fully optimized without causing API-level HTTP 503 errors.
 * **Autonomous Product Search Engine:** Incorporates a Top-K limit (`LIMIT 5`) Entity Resolution algorithm allowing the LLM to search for and list options natively without dropping into Denial-of-Service loops.
+* **Machine Learning Demand Forecasting:** Leverages an offline-trained **XGBoost Regressor** to predict 30-day future demand using backward rolling lag features.
+* **Data-Driven Dynamic Mocking:** Integrates a realistic `csv_to_db.py` pipeline that constructs supply chain dynamics (Safety Stock, Reorder Cycles) proportionally mapped to real historical Amazon Sales Data.
 * **Graceful Degradation:** Failsafes and safety net configurations deployed on the FastAPI layer to intercept Recursion Limit crashes and return static operational JSON responses (`risk_level: Error`).
 * **Robust API Layer:** Exposes the Agent via an asynchronous FastAPI endpoint, securely handling the orchestration requests.
 * **n8n Ready:** Specifically optimized JSON responses (exposing `tool_used`, `risk_level`) to act as a seamless HTTP Webhook backend for an n8n orchestration flow.
-* **Mock Database & Maintenance:** Pre-populated SQLite database coupled with an autonomous `prune_db.py` script to flush stale conversational memory using UUIDv6 timestamp resolution.
+* **Autonomous Database Maintenance:** Cleans historic memory by deciphering UUIDv6 temporal data (`prune_db.py`).
 
 ## 📂 Project Structure
 
@@ -38,10 +40,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**2. Initialize the Mock Database**
-Creates the mock database with standard `Products` data.
+**2. Prepare the Data & Train the Machine Learning Model**
+Creates the relational database from raw sales data and trains the XGBoost demand forecaster.
 ```bash
-python3 database/db_setup.py
+python3 scripts/csv_to_db.py
+python3 scripts/train_model.py
 ```
 
 **3. Configure Environment Variables**
