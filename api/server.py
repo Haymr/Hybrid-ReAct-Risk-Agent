@@ -140,16 +140,19 @@ def retrain_model():
     """
     import subprocess
     import os
+    import sys
     from tools.inventory import reload_model
     
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../scripts/train_model.py"))
     
     try:
-        result = subprocess.run([os.sys.executable, script_path], capture_output=True, text=True, check=True)
+        result = subprocess.run([sys.executable, script_path], capture_output=True, text=True, check=True, timeout=120)
         reload_model()
         return {"status": "success", "message": "Model retrained and loaded into memory successfully.", "logs": result.stdout}
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Training failed: {e.stderr}")
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(status_code=500, detail="Training timed out after 120 seconds.")
 
 @router.get("/scan-inventory")
 def scan_inventory():
@@ -205,10 +208,14 @@ def scan_inventory():
             
         df['risk_level'] = df.apply(get_risk, axis=1)
         
-        # Create table if not exists just to be safe
-        conn.execute('''CREATE TABLE IF NOT EXISTS risk_snapshots (sku TEXT PRIMARY KEY, last_risk_level TEXT)''')
+        # Switch to agent_state.db for snapshots
+        state_db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../database/agent_state.db"))
+        state_conn = sqlite3.connect(f"file:{state_db_path}?mode=rwc", uri=True)
         
-        snapshots = pd.read_sql_query("SELECT sku, last_risk_level FROM risk_snapshots", conn)
+        # Create table if not exists just to be safe
+        state_conn.execute('''CREATE TABLE IF NOT EXISTS risk_snapshots (sku TEXT PRIMARY KEY, last_risk_level TEXT)''')
+        
+        snapshots = pd.read_sql_query("SELECT sku, last_risk_level FROM risk_snapshots", state_conn)
         merged = df.merge(snapshots, on='sku', how='left')
         
         risk_rank = {"Low": 0, "Medium": 1, "High": 2, "Critical": 3}
@@ -228,8 +235,16 @@ def scan_inventory():
                 })
                 
         snapshot_updates = df[['sku', 'risk_level']].copy()
-        snapshot_updates.rename(columns={'risk_level': 'last_risk_level'}, inplace=True)
-        snapshot_updates.to_sql('risk_snapshots', conn, if_exists='replace', index=False)
+        
+        # Use UPSERT to preserve PRIMARY KEY constraint
+        for _, row in snapshot_updates.iterrows():
+            state_conn.execute(
+                "INSERT INTO risk_snapshots (sku, last_risk_level) VALUES (?, ?) "
+                "ON CONFLICT(sku) DO UPDATE SET last_risk_level=excluded.last_risk_level",
+                (row['sku'], row['risk_level'])
+            )
+        state_conn.commit()
+        state_conn.close()
         
         conn.close()
         return {"status": "success", "total_scanned": len(df), "escalated_items": escalated_items}
