@@ -56,6 +56,10 @@ def train_demand_forecaster():
     merged_df['lag_14'] = merged_df.groupby('sku')['qty'].transform(lambda x: x.rolling(14, min_periods=1).sum())
     merged_df['lag_30'] = merged_df.groupby('sku')['qty'].transform(lambda x: x.rolling(30, min_periods=1).sum())
     
+    # Yeni Özellikler (Velocity ve Seyreklik)
+    merged_df['velocity_ratio'] = merged_df['lag_7'] / (merged_df['lag_30'] + 1)
+    merged_df['is_no_history'] = (merged_df['lag_30'] == 0).astype(int)
+    
     print("[*] Gelecek 30 Gün (Hedef/Target) hesaplanıyor...")
     # Shift ile bir sonraki günden itibaren 30 günlük toplam
     indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=30)
@@ -67,20 +71,14 @@ def train_demand_forecaster():
     
     print(f"[*] Eğitim veriseti hazır: {len(train_df)} örneklem. XGBoost Eğitimi Başlıyor...")
     
-    features = ['lag_7', 'lag_14', 'lag_30']
+    features = ['lag_7', 'lag_14', 'lag_30', 'velocity_ratio', 'is_no_history']
     X = train_df[features]
     y = train_df['target_30d']
     
-    # Zaman Serisi Doğrulaması (Time-based Split Validation)
-    # Son 20 günlük bilinen veriyi Test olarak ayırıyoruz (Data Leakage'i önlemek için)
-    cutoff_date = train_df['date'].max() - pd.Timedelta(days=20)
-    train_mask = train_df['date'] < cutoff_date
-    
-    X_train, y_train = train_df[train_mask][features], train_df[train_mask]['target_30d']
-    X_test, y_test = train_df[~train_mask][features], train_df[~train_mask]['target_30d']
-    
-    # XGBoost Regressor
+    # XGBoost Regressor (Quantile Forecasting)
     model = xgb.XGBRegressor(
+        objective='reg:quantileerror',
+        quantile_alpha=[0.1, 0.5, 0.9],
         n_estimators=150, 
         learning_rate=0.1, 
         max_depth=6, 
@@ -88,17 +86,7 @@ def train_demand_forecaster():
         n_jobs=-1
     )
     
-    print("[*] Model Test ediliyor (Validation)...")
-    model.fit(X_train, y_train)
-    
-    # Gerçek test verisi üzerinde metrik kontrolü
-    y_pred_test = model.predict(X_test)
-    mae_test = mean_absolute_error(y_test, y_pred_test)
-    
-    print(f"[+] XGBoost Eğitimi Tamamlandı!")
-    print(f"    Test Seti Ortalama Mutlak Hata (Gerçek MAE): {mae_test:.2f} adet (Önümüzdeki 30 gün tahmini için gerçek sapma payı)")
-    
-    print("[*] Tüm veri ile Final Model (Production) eğitiliyor...")
+    print("[*] Tüm veri ile Olasılıksal Model (Quantile P10, P50, P90) eğitiliyor...")
     model.fit(X, y)
     
     # Modeli kaydetme

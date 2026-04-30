@@ -73,18 +73,31 @@ def calculate_inventory_risk(product_sku: str) -> dict:
         if not lag_data or lag_data == (0, 0, 0):
             # No sales history found, fallback to 0 demand
             lag_7, lag_14, lag_30 = 0, 0, 0
-            predicted_demand_30d = 0
+            p10, p50, p90 = 0, 0, 0
         else:
             lag_7, lag_14, lag_30 = lag_data
+            velocity_ratio = lag_7 / (lag_30 + 1)
+            is_no_history = 1 if lag_30 == 0 else 0
+            
             # 3. Predict Demand via ML Model
             model = get_ml_model()
-            X_infer = pd.DataFrame([{'lag_7': lag_7, 'lag_14': lag_14, 'lag_30': lag_30}])
-            predicted_demand_30d = max(0, int(model.predict(X_infer)[0])) # Demand can't be negative
+            X_infer = pd.DataFrame([{
+                'lag_7': lag_7, 
+                'lag_14': lag_14, 
+                'lag_30': lag_30,
+                'velocity_ratio': velocity_ratio,
+                'is_no_history': is_no_history
+            }])
+            preds = model.predict(X_infer)[0] # Shape is (1, 3), [0] gives array of 3
             
-        # 4. Risk Dynamics Calculation (Refactored to 'Days of Stock' logic)
-        if predicted_demand_30d > 0:
-            # How many days will the current stock last?
-            days_of_stock = current_stock / (predicted_demand_30d / 30)
+            p10 = max(0, int(preds[0]))
+            p50 = max(0, int(preds[1]))
+            p90 = max(0, int(preds[2]))
+            
+        # 4. Risk Dynamics Calculation (using P50 as main estimate)
+        if p50 > 0:
+            # How many days will the current stock last based on median demand?
+            days_of_stock = current_stock / (p50 / 30)
         else:
             days_of_stock = float('inf')
             
@@ -103,7 +116,15 @@ def calculate_inventory_risk(product_sku: str) -> dict:
             "risk_level": risk_level,
             "current_stock": current_stock,
             "critical_threshold": critical_threshold,
-            "predicted_demand_30d": predicted_demand_30d,
+            "demand_forecast": {
+                "optimistic_p10": p10,
+                "median_p50": p50,
+                "conservative_p90": p90
+            },
+            "business_metrics": {
+                "tail_risk_demand_p90": p90,
+                "var_90_units": p90
+            },
             "historical_lags": {
                 "last_7_days": lag_7,
                 "last_14_days": lag_14,

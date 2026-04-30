@@ -39,7 +39,8 @@ LangGraph'ın standart karmaşık array yapısı içinden veri ayıklamak n8n ta
 ### 4. Makine Öğrenmesi & Veri Hattı Kurulumu (Faz 2)
 Agent sunucusunu başlatmadan önce veritabanının oluşturulması ve XGBoost yapay zeka modelinin eğitilmesi zorunludur:
 1. `python3 scripts/csv_to_db.py`: `cleaned_sales.csv` verisini SQLite formatına dönüştürür ve gerçek satış hızına oranlı sahte (mock) stok durumları üretir (`amazon_sales.db`).
-2. `python3 scripts/train_model.py`: Geriye dönük Lag (7, 14, 30 gün) verilerini kullanarak **XGBoost Talep Tahmin Modelini** eğitir ve sistemi Agent'ın kullanımına hazır hale getirir (`models/xgboost_demand_forecaster.pkl`).
+2. `python3 scripts/train_model.py`: Geriye dönük Lag (7, 14, 30 gün) ve satış ivmesi (Velocity) verilerini kullanarak **Olasılıksal XGBoost Talep Tahmin Modelini (Quantile XGBoost)** eğitir ve sistemi Agent'ın kullanımına hazır hale getirir (`models/xgboost_demand_forecaster.pkl`). Bu model sayesinde P10 (Kötümser), P50 (Medyan) ve P90 (Kuyruk Riski) tahminlerini tek seferde alabilirsiniz.
+3. Modelinizin kalitesini ve sipariş karşılama oranını (Fill Rate) görsel olarak test etmek için `notebooks/evaluate_model.ipynb` dosyasını kullanabilirsiniz.
 
 * LangGraph checkpointer yapısı zamanla `agent_state.db` dosyasını şişirecektir. Uzun soluklu üretim ortamlarında UUIDv6 mantığıyla en eski mesaj/içerik (thread) geçmişini silerek veri tabanı depolama kapasitesini sıkıştıran ve rahatlatan komutu periyodik olarak çalıştırabilirsiniz:
   `python scripts/prune_db.py 7` (Sondan "7" günü korur, öncekileri VACUUM komutu ile siler.)
@@ -86,7 +87,8 @@ Extracting deeply nested keys in n8n UI mappings can be frustrating. To make int
 ### 4. Machine Learning & Data Pipeline Setup (Phase 2)
 Before starting the agent server, you must generate the database schema and train the XGBoost Artificial Intelligence model:
 1. `python3 scripts/csv_to_db.py`: Converts the `cleaned_sales.csv` into a structured SQLite format (`amazon_sales.db`) and systematically generates proportional synthetic stock levels based on true historical velocities.
-2. `python3 scripts/train_model.py`: Trains the **XGBoost Demand Forecasting Model** using historically engineered backward Lags (7, 14, 30 days) and registers it as a read-to-inference artifact (`models/xgboost_demand_forecaster.pkl`).
+2. `python3 scripts/train_model.py`: Trains the **Quantile XGBoost Demand Forecasting Model** using historically engineered backward Lags (7, 14, 30 days) and Velocity Ratios. It natively outputs probabilistic bounds (P10, P50, P90) and registers it as a read-to-inference artifact (`models/xgboost_demand_forecaster.pkl`).
+3. To visually test your model's quality and fulfillment success (Fill Rate), you can execute the `notebooks/evaluate_model.ipynb` file.
 
 * Over extensive usage, SQLite LangGraph checkpoint saves will grow substantially. In production environments, rely on the temporal UUIDv6 resolution utility to systematically prune old conversation thread entries while compressing bytes (`VACUUM`):
   `python scripts/prune_db.py 7` (Preserves threads from the last "7" days, deleting outdated data to ensure optimal API speed bounds.)

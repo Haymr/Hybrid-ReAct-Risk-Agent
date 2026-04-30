@@ -193,11 +193,18 @@ def scan_inventory():
         if df.empty:
             return {"escalated_items": []}
             
+        # Add new features for quantile model
+        df['velocity_ratio'] = df['lag_7'] / (df['lag_30'] + 1)
+        df['is_no_history'] = (df['lag_30'] == 0).astype(int)
+            
         model = get_ml_model()
-        X_infer = df[['lag_7', 'lag_14', 'lag_30']]
-        df['predicted_demand'] = model.predict(X_infer).clip(min=0).astype(int)
+        X_infer = df[['lag_7', 'lag_14', 'lag_30', 'velocity_ratio', 'is_no_history']]
         
-        demand_per_day = df['predicted_demand'] / 30.0
+        preds = model.predict(X_infer).clip(min=0).astype(int)
+        df['predicted_demand_p50'] = preds[:, 1]
+        df['predicted_demand_p90'] = preds[:, 2]
+        
+        demand_per_day = df['predicted_demand_p50'] / 30.0
         df['days_of_stock'] = df.apply(lambda row: row['current_stock'] / demand_per_day[row.name] if demand_per_day[row.name] > 0 else float('inf'), axis=1)
         
         def get_risk(row):
@@ -231,7 +238,8 @@ def scan_inventory():
                     "old_risk": old_risk,
                     "new_risk": new_risk,
                     "current_stock": row['current_stock'],
-                    "predicted_demand_30d": row['predicted_demand']
+                    "predicted_demand_p50": row['predicted_demand_p50'],
+                    "tail_risk_demand_p90": row['predicted_demand_p90']
                 })
                 
         snapshot_updates = df[['sku', 'risk_level']].copy()
