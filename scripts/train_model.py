@@ -63,7 +63,7 @@ def train_demand_forecaster():
     print("[*] Gelecek 30 Gün (Hedef/Target) hesaplanıyor...")
     # Shift ile bir sonraki günden itibaren 30 günlük toplam
     indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=30)
-    merged_df['target_30d'] = merged_df.groupby('sku')['qty'].transform(lambda x: x.rolling(window=indexer, min_periods=1).sum().shift(-1))
+    merged_df['target_30d'] = merged_df.groupby('sku')['qty'].transform(lambda x: x.rolling(window=indexer, min_periods=30).sum().shift(-1))
     
     # Target'ı null olan satırları atıyoruz (Çünkü o günlerden sonraki 30 günü bilmiyoruz)
     # NOT: Verisetinin son 30 günü train testine giremez, çünkü "gelecek 30 günü" yaşanmadı!

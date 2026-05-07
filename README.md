@@ -4,13 +4,15 @@ A production-grade, closed-loop AI agent pipeline built with **LangGraph**, **Fa
 
 ## 🚀 Key Features
 
-* **LangGraph Cognitive Core:** Implements deterministic tool usage with strong system prompt guardrails.
+* **LangGraph Cognitive Core:** Implements a true ReAct loop (Reasoning + Acting cycle) with strict system prompt guardrails, a smart SKU abbreviation search strategy, and infinite-loop prevention rules.
 * **Persistent Memory:** Utilizes `SqliteSaver` in WAL mode to handle concurrent conversation state management efficiently.
 * **Token Bloat Protection:** Employs `trim_messages` combined with a local `tiktoken` proxy to ensure the context window remains fully optimized without causing API-level HTTP 503 errors.
-* **Autonomous Product Search Engine:** Incorporates a Top-K limit (`LIMIT 5`) Entity Resolution algorithm allowing the LLM to search for and list options natively without dropping into Denial-of-Service loops.
+* **Autonomous Product Search Engine:** Incorporates a Top-K limit (`LIMIT 5`) Entity Resolution algorithm. The agent knows SKU abbreviations (e.g., `Kurta=KR`) and retries with shorter terms on failed searches before gracefully giving up after 2 attempts.
 * **Machine Learning Demand Forecasting:** Leverages an offline-trained **Quantile XGBoost Regressor** to predict 30-day future demand. It natively outputs probabilistic bounds: `P10` (Optimistic), `P50` (Median, used for primary risk threshold), and `P90` (Conservative/Tail Risk, used for Value-at-Risk reporting).
-* **Business & Risk Metrics:** Incorporates advanced feature engineering (`velocity_ratio`) and evaluates intermittent demand using the `MASE` (Mean Absolute Scaled Error) metric alongside `Fill Rate` and `Lost Sales` KPIs.
-* **Data-Driven Dynamic Mocking:** Integrates a realistic `csv_to_db.py` pipeline that constructs supply chain dynamics (Safety Stock, Reorder Cycles) proportionally mapped to real historical Amazon Sales Data.
+* **Dynamic Risk Thresholds:** Risk levels are calculated against each product's `lead_time_days` (sourced from the inventory table), not hardcoded day values. A high-velocity SKU sourced locally (3-day lead time) and a slow-moving SKU from a distant supplier (14-day lead time) are evaluated on their own supply chain context.
+* **Training Data Integrity:** The `FixedForwardWindowIndexer` uses `min_periods=30`, ensuring only rows with a complete 30-day future window train the model. Partial-window targets (last 29 days per SKU) are excluded via `dropna`.
+* **Business & Risk Metrics:** Incorporates advanced feature engineering (`velocity_ratio`, `is_no_history`) and evaluates intermittent demand using the `MASE` (Mean Absolute Scaled Error) metric alongside `Fill Rate` and `Lost Sales` KPIs.
+* **Data-Driven Dynamic Mocking:** Integrates a realistic `csv_to_db.py` pipeline that constructs supply chain dynamics (Safety Stock, Lead Time, Reorder Cycles) proportionally mapped to real historical Amazon Sales Data.
 * **Graceful Degradation:** Failsafes and safety net configurations deployed on the FastAPI layer to intercept Recursion Limit crashes and return static operational JSON responses (`risk_level: Error`).
 * **Robust API Layer:** Exposes the Agent via an asynchronous FastAPI endpoint, securely handling the orchestration requests.
 * **Dynamic Operational Endpoints:** Supports real-time stock updates (`/update-stock`), nightly batch scanning (`/scan-inventory`) with escalation detection, and zero-downtime model retraining (`/retrain`).
@@ -119,7 +121,7 @@ Response format with probabilistic demand forecast and n8n-ready alert flag:
 }
 ```
 
-The underlying tool returns a full probabilistic payload:
+The underlying tool returns a full probabilistic payload including supply chain context:
 ```json
 {
   "sku": "JNE3781-KR-XXXL",
@@ -127,6 +129,8 @@ The underlying tool returns a full probabilistic payload:
   "risk_level": "Critical",
   "current_stock": 19,
   "critical_threshold": 18,
+  "lead_time_days": 7,
+  "days_of_stock": 23.8,
   "demand_forecast": {
     "optimistic_p10": 3,
     "median_p50": 16,

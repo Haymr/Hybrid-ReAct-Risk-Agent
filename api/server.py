@@ -23,7 +23,7 @@ def chat_endpoint(request: ChatRequest):
     Receives user message and passes it to the LangGraph agent.
     Returns the agent's final decision and thought steps, optimized for n8n Webhooks.
     """
-    config = {"configurable": {"thread_id": request.user_id}, "recursion_limit": 5}
+    config = {"configurable": {"thread_id": request.user_id}, "recursion_limit": 15}
     
     def invoke_agent():
         steps = []
@@ -181,7 +181,8 @@ def scan_inventory():
             CROSS JOIN max_date m
             GROUP BY s.sku
         )
-        SELECT i.sku, i.current_stock, i.critical_threshold, 
+        SELECT i.sku, i.current_stock, i.critical_threshold,
+               COALESCE(i.lead_time_days, 7) as lead_time_days,
                COALESCE(l.lag_7, 0) as lag_7, 
                COALESCE(l.lag_14, 0) as lag_14, 
                COALESCE(l.lag_30, 0) as lag_30
@@ -208,9 +209,10 @@ def scan_inventory():
         df['days_of_stock'] = df.apply(lambda row: row['current_stock'] / demand_per_day[row.name] if demand_per_day[row.name] > 0 else float('inf'), axis=1)
         
         def get_risk(row):
+            lt = row['lead_time_days']
             if row['current_stock'] <= row['critical_threshold']: return "Critical"
-            elif row['days_of_stock'] < 7: return "High"
-            elif row['days_of_stock'] < 14: return "Medium"
+            elif row['days_of_stock'] < lt: return "High"
+            elif row['days_of_stock'] < lt * 2: return "Medium"
             else: return "Low"
             
         df['risk_level'] = df.apply(get_risk, axis=1)

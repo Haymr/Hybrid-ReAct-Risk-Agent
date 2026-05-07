@@ -16,11 +16,22 @@ The model uses lag-based features (autoregressive strategy):
 ## The `target_30d` Variable
 Instead of predicting the next 1 day, the model predicts the **SUM of sales for the upcoming 30 days**. This acts as a smoothing mechanism that significantly improves accuracy and reduces alert noise (essential for supply chain stability).
 
+> **Training Integrity Note:** The `FixedForwardWindowIndexer` uses `min_periods=30`, ensuring only rows with a full 30-day future window contribute to training. The last 29 days of each SKU's history are excluded via `dropna`, preventing the model from learning from artificially low partial-window targets.
+
 ## Probabilistic Forecasting (Quantiles)
 The model outputs a 2D array of shape `(N, 3)` corresponding to three quantiles:
 * **P10 (Optimistic):** Worst-case scenario for revenue (low sales).
 * **P50 (Median):** The most likely scenario. Used as the main threshold for risk classification.
 * **P90 (Conservative/Tail Risk):** Worst-case scenario for inventory (high sales). Used as a Value-at-Risk (VaR) insight to prevent stockouts.
+
+## Dynamic Risk Thresholds
+Risk levels are **not** calculated against hardcoded day values. They are based on each product's `lead_time_days` column from the `inventory` table:
+- `Critical`: `current_stock <= critical_threshold`
+- `High`: `days_of_stock < lead_time_days` — stock will run out before the supplier can even replenish
+- `Medium`: `days_of_stock < lead_time_days * 2` — safety margin is thin
+- `Low`: all other cases
+
+The `calculate_inventory_risk` tool now returns `lead_time_days` and `days_of_stock` in its JSON output so the LLM can reason about supply chain context explicitly.
 
 ## Model Evaluation (`evaluate_model.ipynb`)
 Evaluations are kept in a Jupyter Notebook to visualize distributions (like Fill Rate). The metrics used:
@@ -35,4 +46,4 @@ Evaluations are kept in a Jupyter Notebook to visualize distributions (like Fill
 - **Reloading:** Once training finishes, the new `xgboost_model.pkl` is saved to disk, and `reload_model()` is called to flush the cached `_model` global variable, forcing the API to load the fresh weights on the very next inference.
 
 > **Instruction for Future LLMs:** 
-> Do not attempt to refactor this into an LSTM or TCN. Deep Learning models are overengineering for this use case and will break the lightweight MLOps pipeline. If you want to improve model accuracy, add features like `day_of_week`, `is_weekend`, or `month` to the lag calculation.
+> Do not attempt to refactor this into an LSTM or TCN. Deep Learning models are overengineering for this use case and will break the lightweight MLOps pipeline. If you want to improve model accuracy, add features like `day_of_week`, `is_weekend`, or `month` to the lag calculation. Do NOT change `min_periods` back to 1 — this would reintroduce partial-window target leakage.

@@ -11,12 +11,13 @@ Contains historical Amazon sales data.
 - **Usage**: Used to calculate historical lags (Lag 7, Lag 14, Lag 30) for the XGBoost model.
 
 ### Table: `inventory`
-Contains the current stock and critical thresholds per SKU.
+Contains the current stock, critical thresholds, and supplier lead times per SKU.
 - **Columns**: 
   - `sku` (TEXT, PRIMARY KEY)
   - `current_stock` (INTEGER)
-  - `critical_threshold` (INTEGER) - Dynamically generated based on lead time and max daily sales.
-- **Usage**: Used by `GET /scan-inventory` and updated by `POST /update-stock` (to simulate sales deductions).
+  - `critical_threshold` (INTEGER) - Dynamically generated based on product-specific lead time and safety factor.
+  - `lead_time_days` (INTEGER, DEFAULT 7) - Supplier lead time categorized by sales velocity: high-volume SKUs get 3 days, medium-volume 7 days, low-volume 14 days.
+- **Usage**: Used by `GET /scan-inventory` and updated by `POST /update-stock` (to simulate sales deductions). The `lead_time_days` field drives the dynamic risk thresholds (`High` = `days_of_stock < lead_time_days`).
 
 ## 2. `database/agent_state.db` (Agent Memory & Output)
 This database holds the memory of the LangGraph agent and historical snapshots for alerting.

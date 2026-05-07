@@ -84,9 +84,17 @@ def build_database():
         else:
             avg_daily_sales = 0.1  # Fallback: çok düşük satışlı ürün
 
-        # ── Critical Threshold: satış hızına dayalı ──
-        # Formül: Günlük ort. satış × tedarik süresi × güvenlik çarpanı
-        critical_threshold = int(avg_daily_sales * ASSUMED_LEAD_TIME_DAYS * SAFETY_FACTOR)
+        # ── Lead Time: satış hızına göre dinamik tedarik süresi ──
+        # Yüksek hacimli ürünler yerel tedarikçiden, düşük hacimli olanlar uzak tedarikçiden
+        if avg_daily_sales > 5:
+            lead_time_days = 3    # Yüksek hacim → yerel/hızlı tedarikçi
+        elif avg_daily_sales >= 1:
+            lead_time_days = 7    # Orta hacim → standart tedarik
+        else:
+            lead_time_days = 14   # Düşük hacim → uzak/seyrek tedarikçi
+
+        # ── Critical Threshold: ürüne özgü lead time dayalı ──
+        critical_threshold = int(avg_daily_sales * lead_time_days * SAFETY_FACTOR)
         critical_threshold = max(critical_threshold, MIN_THRESHOLD)
 
         # ── Current Stock: kontrollü çeşitlilik ──
@@ -108,18 +116,19 @@ def build_database():
             # Stok, threshold'un altında → alarm bölgesi
             current_stock = random.randint(MIN_STOCK, max(critical_threshold - 1, MIN_STOCK))
 
-        inventory_data.append((sku, current_stock, critical_threshold))
+        inventory_data.append((sku, current_stock, critical_threshold, lead_time_days))
 
     cursor.execute('''
         CREATE TABLE inventory (
             sku TEXT PRIMARY KEY,
             current_stock INTEGER,
-            critical_threshold INTEGER
+            critical_threshold INTEGER,
+            lead_time_days INTEGER DEFAULT 7
         )
     ''')
 
     cursor.executemany(
-        "INSERT INTO inventory (sku, current_stock, critical_threshold) VALUES (?, ?, ?)",
+        "INSERT INTO inventory (sku, current_stock, critical_threshold, lead_time_days) VALUES (?, ?, ?, ?)",
         inventory_data
     )
 

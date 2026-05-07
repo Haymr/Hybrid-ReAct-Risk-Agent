@@ -40,7 +40,7 @@ def calculate_inventory_risk(product_sku: str) -> dict:
         
         # 1. Fetch Inventory Status
         cursor.execute(
-            "SELECT sku, current_stock, critical_threshold FROM inventory WHERE sku LIKE ?", 
+            "SELECT sku, current_stock, critical_threshold, COALESCE(lead_time_days, 7) FROM inventory WHERE sku LIKE ?",
             (f"%{product_sku}%",)
         )
         rows = cursor.fetchall()
@@ -54,7 +54,7 @@ def calculate_inventory_risk(product_sku: str) -> dict:
             conn.close()
             return {"error": f"Multiple SKUs found containing '{product_sku}': {skus}. Please ask the user to clarify which specific SKU they mean."}
             
-        sku, current_stock, critical_threshold = rows[0]
+        sku, current_stock, critical_threshold, lead_time_days = rows[0]
         
         # 2. Fetch Historical Lags for ML Model
         cursor.execute("""
@@ -103,9 +103,11 @@ def calculate_inventory_risk(product_sku: str) -> dict:
             
         if current_stock <= critical_threshold:
             risk_score, risk_level = 90, "Critical"
-        elif days_of_stock < 7:
+        elif days_of_stock < lead_time_days:
+            # Stock won't even cover the replenishment lead time
             risk_score, risk_level = 70, "High"
-        elif days_of_stock < 14:
+        elif days_of_stock < lead_time_days * 2:
+            # Safety margin is thin — 1 lead time of buffer only
             risk_score, risk_level = 40, "Medium"
         else:
             risk_score, risk_level = 10, "Low"
@@ -116,6 +118,8 @@ def calculate_inventory_risk(product_sku: str) -> dict:
             "risk_level": risk_level,
             "current_stock": current_stock,
             "critical_threshold": critical_threshold,
+            "lead_time_days": lead_time_days,
+            "days_of_stock": round(days_of_stock, 1) if days_of_stock != float('inf') else None,
             "demand_forecast": {
                 "optimistic_p10": p10,
                 "median_p50": p50,
