@@ -21,6 +21,7 @@ n8n/
 
 # Local scratchpads
 scratch/
+CHANGELOG.md
 
 # Confidential Data Files
 *.csv
